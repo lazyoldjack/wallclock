@@ -1,0 +1,11 @@
+# filename: WallClock2.yaml
+
+# This app specification file executes the 'Wall Clock' app on install
+# and runs again within 2 seconds when it terminates, to facilitate a clean slate
+
+name: WallClock
+entrypoint: WallClockV2.toit
+triggers:
+  on_boot: true
+  on_install: true
+  on_interval: "2s"
