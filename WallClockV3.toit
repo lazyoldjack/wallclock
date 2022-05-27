@@ -1,5 +1,6 @@
-// Wall Clock V2 
+// Wall Clock V3 
 // Copyright 2022 John Ellis. All rights reserved.
+//V3 added MQTT storage of the clock face time (where the hands are pointing)
 
 
 // ESP32 system to drive 100yr old school clock that requires a pulse every 30 seconds
@@ -276,7 +277,7 @@ main :
         ctime = start_ctime //kickoff with stored cft from MQTT
 
 ///////// now pulse if/when required, terminate every day at noon for a clean slate
-    while not (Time.now.local.h == 12 and Time.now.local.m == 00 and Time.now.local.s == 0 and restart):
+    while not (Time.now.local.h == 12 and Time.now.local.m == 00 and Time.now.local.s == 5 and restart): // 5secs after last pulse
         dur = Duration.since ctime
         //check to prevent restart if time is being adjusted, ie dur is > 60secs or less than 0
         if dur > SEC60 or dur < SEC0:
@@ -292,14 +293,8 @@ main :
         if cval.is_empty == false: //values have been set so use them
             setctime cval
     //exiting for restart        
-    pulse client// will miss this one while exiting so explicitly do it here
+    //probably not required, testing... pulse client// will miss this one while exiting so explicitly do it here
     print "Stopping for clean slate restart"
     
     exit 0   //hard exit to kill restserver as well as this program
         
-
-
-
-
-
-
