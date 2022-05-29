@@ -26,7 +26,7 @@ SEC60 ::= Duration --s=60
 SEC0 ::= Duration --s=0
 
 CLIENT_ID ::= "WallClock"
-HOST ::= "192.168.1.19" // Or could use lesjalons.uk.to if clock was on different network but will be lower via internet.
+HOST ::= "192.168.1.19" // Or could use external MQTT broker.
 PORT ::= 1883
 TOPIC ::= "/mqtt/wallclock"
 
