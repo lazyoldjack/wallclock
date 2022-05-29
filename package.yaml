@@ -1,0 +1,7 @@
+dependencies:
+  mqtt:
+    url: github.com/toitware/mqtt
+    version: ^1.4.0
+  rest_server:
+    url: github.com/mikkeldamsgaard/pkg-rest-server
+    version: ^1.0.1

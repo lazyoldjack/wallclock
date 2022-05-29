@@ -1,46 +1,41 @@
-// Wall Clock V3 
+// Wall Clock V3
 // Copyright 2022 John Ellis. All rights reserved.
-//V3 added MQTT storage of the clock face time (where the hands are pointing)
+// V3 added MQTT storage of the clock face time (where the hands are pointing)
 
 
-// ESP32 system to drive 100yr old school clock that requires a pulse every 30 seconds
-// Accuracy is maintained by Toit's time being maintained from some timeserver or other
+// ESP32 system to drive 100yr old school clock that requires a pulse every 30 seconds.
+// Accuracy is maintained by Toit's time being maintained from some timeserver or other.
 
-import gpio 
-import net.tcp show ServerSocket 
+import gpio
+import net.tcp show ServerSocket
 import net
 import mqtt
 
 import rest_server show RestServer RestRequest RestResponse
 
-coil/gpio.Pin := gpio.Pin 12 --output //pin to drive solenoid MOSFET
+coil/gpio.Pin ::= gpio.Pin 12 --output // Pin to drive solenoid MOSFET.
 
-ctime/Time := Time.now //Clock face time
-start_ctime/Time := Time.from_string "2000-01-01T12:00:00"
-PULSETIME ::= 10 //time for pulse to be on in ms
-CHECKWAIT := 1000 - PULSETIME //milliseconds wait before checking time. This will be the click rate at its fastest when clock is behind at beginning of summertime
-SEC30 := Duration --s=30
-SEC60 := Duration --s=60
-SEC0 := Duration --s=0
-dur := Duration --s=0
-restart/bool := true
-just_started/bool := true
-
-ss /ServerSocket := net.open.tcp_listen 80
-mp := {:} //time map
-cval := [] //incoming time values to set clock
+ctime/Time := Time.now // Clock face time.
+PULSETIME_MS ::= 10 // Time for pulse to be on in ms.
+// The maximum time we are willing to wait to get to an accurate time.
+// If the clock is only slightly ahead we are going to stand still until the
+// time is correct again.
+MAX_STAND_STILL_DURATION ::= Duration --m=5
+SEC30 ::= Duration --s=30
+SEC60 ::= Duration --s=60
+SEC0 ::= Duration --s=0
 
 CLIENT_ID ::= "WallClock"
-HOST ::= "192.168.1.19" //or could use lesjalons.uk.to if clock was on different network but will be lower via internet
+HOST ::= "192.168.1.19" // Or could use lesjalons.uk.to if clock was on different network but will be lower via internet.
 PORT ::= 1883
 TOPIC ::= "/mqtt/wallclock"
 
 
-//either cft, clock face time form or thy, thank you
-//static HTML defined here
-htmlcft := """<html>
+// Either cft, clock face time form or thy, thank you.
+// Static HTML defined here.
+HTML_CFT := """<html>
     <head>
-        <title>Clock Face TIme</title>
+        <title>Clock Face Time</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="icon" href="data:,">
         <style>
@@ -48,7 +43,7 @@ htmlcft := """<html>
             h1{color: #0F3376; padding: 2vh;}p{font-size: 1.5rem;}
             table{color: #0F0F76; padding: 2vh;}p{font-size: 1.5rem; align:center;}
             table.center {
-                margin-left:auto; 
+                margin-left:auto;
                 margin-right:auto;
             }
             .button{display: inline-block; background-color: #e7bd3b; border: none; border-radius: 4px; color: white; padding: 16px 40px; text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
@@ -56,89 +51,19 @@ htmlcft := """<html>
         </style>
     </head>
     <body>
-        <h1>Clock Face Time</h1> 
+        <h1>Clock Face Time</h1>
         <p>Please enter the time showing on the clock face:</p>
         <form  action="/thy" method="post">
         <table class="center">
         <tr><td>Hours</td><td>Mins</td><td>Secs</td><td/></tr>
         <tr><td>
         <select id="hh" name="hh" width="2">
-            <option value="0">00</option>
-            <option value="1">01</option>
-            <option value="2">02</option>
-            <option value="3">03</option>
-            <option value="4">04</option>
-            <option value="5">05</option>
-            <option value="6">06</option>
-            <option value="7">07</option>
-            <option value="8">08</option>
-            <option value="9">09</option>
-            <option value="10">10</option>
-            <option value="11">11</option>
+            $((List 12: "<option value=\"$it\">$(%02d it)</option>").join "\n")
         </select>
         </td>
         <td>
         <select id="mi" name="mi"  width="2">
-            <option value="0">00</option>
-            <option value="1">01</option>
-            <option value="2">02</option>
-            <option value="3">03</option>
-            <option value="4">04</option>
-            <option value="5">05</option>
-            <option value="6">06</option>
-            <option value="7">07</option>
-            <option value="8">08</option>
-            <option value="9">09</option>
-            <option value="10">10</option>
-            <option value="11">11</option>
-            <option value="12">12</option>
-            <option value="13">13</option>
-            <option value="14">14</option>
-            <option value="15">15</option>
-            <option value="16">16</option>
-            <option value="17">17</option>
-            <option value="18">18</option>
-            <option value="19">19</option>
-            <option value="20">20</option>
-            <option value="21">21</option>
-            <option value="22">22</option>
-            <option value="23">23</option>
-            <option value="24">24</option>
-            <option value="25">25</option>
-            <option value="26">26</option>
-            <option value="27">27</option>
-            <option value="28">28</option>
-            <option value="29">29</option>
-            <option value="30">30</option>
-            <option value="31">31</option>
-            <option value="32">32</option>
-            <option value="33">33</option>
-            <option value="34">34</option>
-            <option value="35">35</option>
-            <option value="36">36</option>
-            <option value="37">37</option>
-            <option value="38">38</option>
-            <option value="39">39</option>
-            <option value="40">40</option>
-            <option value="41">41</option>
-            <option value="42">42</option>
-            <option value="43">43</option>
-            <option value="44">44</option>
-            <option value="45">45</option>
-            <option value="46">46</option>
-            <option value="47">47</option>
-            <option value="48">48</option>
-            <option value="49">49</option>
-            <option value="50">50</option>
-            <option value="51">51</option>
-            <option value="52">52</option>
-            <option value="53">53</option>
-            <option value="54">54</option>
-            <option value="55">55</option>
-            <option value="56">56</option>
-            <option value="57">57</option>
-            <option value="58">58</option>
-            <option value="59">59</option>
+            $((List 60: "<option value=\"$it\">$(%02d it)</option>").join "\n")
         </select>
         </td>
         <td>
@@ -155,146 +80,175 @@ htmlcft := """<html>
     </body>
 </html>"""
 
-htmlthy := """<head>
-        <title>Clock Face TIme</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link rel="icon" href="data:,">
-        <style>
-            html{font-family: Helvetica; display:inline-block; margin: 0px auto; text-align: center;}
-            h1{color: #0F3376; padding: 2vh;}p{font-size: 1.5rem;}
-            table{color: #0F0F76; padding: 2vh;}p{font-size: 1.5rem; align:center;}
-            table.center {
-                margin-left:auto; 
-                margin-right:auto;
-            }
-            .button{display: inline-block; background-color: #e7bd3b; border: none; border-radius: 4px; color: white; padding: 16px 40px; text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
-            .button2{background-color: #4286f4;}
-        </style>
-    </head>
-    <body>
-        <h1>Clock set to:</h1> 
-        <p>"""
-
-/**   Time now inserted here when response is made **/
-xx := """</p>
-        <p><a href="http://www.google.com"><button class="button button2">Finished</button></a><p>
-    </body>
-</html>"""
+html_thy t/Time -> string:
+  return """
+    <html>
+        <head>
+            <title>Clock Face Time</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <link rel="icon" href="data:,">
+            <style>
+                html{font-family: Helvetica; display:inline-block; margin: 0px auto; text-align: center;}
+                h1{color: #0F3376; padding: 2vh;}p{font-size: 1.5rem;}
+                table{color: #0F0F76; padding: 2vh;}p{font-size: 1.5rem; align:center;}
+                table.center {
+                    margin-left:auto;
+                    margin-right:auto;
+                }
+                .button{display: inline-block; background-color: #e7bd3b; border: none; border-radius: 4px; color: white; padding: 16px 40px; text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
+                .button2{background-color: #4286f4;}
+            </style>
+        </head>
+        <body>
+            <h1>Clock set to:</h1>
+            <p>
+            $(%02d t.local.h):$(%02d t.local.m):$(%02d t.local.s)
+            </p>
+            <p><a href="http://www.google.com"><button class="button button2">Finished</button></a><p>
+        </body>
+    </html>"""
 
 
 //////////////////////////////
-pulse pclient:
-    coil.set 1
-    sleep 
-        --ms=PULSETIME
-    coil.set 0
-    ctime = ctime + SEC30
-    //publish the latest clock face time to be retained in case of power outage
-    pclient.publish TOPIC ctime.local.stringify.to_byte_array --qos=1 --retain=true
-    //print "published $ctime.local"
-    //wdt.feed() //feed watchdog timer if required
+pulse pclient/mqtt.Client:
+  coil.set 1
+  sleep --ms=PULSETIME_MS
+  coil.set 0
+  ctime = ctime + SEC30
+  // Publish the latest clock face time to be retained in case of power outage.
+  pclient.publish TOPIC ctime.local.stringify.to_byte_array --qos=1 --retain=true
+  //print "published $ctime.local"
+  //wdt.feed() //feed watchdog timer if required
 
 
 ////////////////////////////////////////
-setctime val:
-    thing := []
-    print "==== Setting Clock time..."
-    print val
+set_ctime val:
+  thing := []
+  print "==== Setting Clock time..."
+  print val
 
-    val.do: | item |
-        thing = item.split "="
-        mp[thing[0]] = int.parse thing[1]
-    if Time.now.local.h > 11: //12 or after in 24hr clock
-        mp["hh"] = mp["hh"] + 12
-    ////now set ctime to be these values
-    ctime = Time.local Time.now.local.year Time.now.local.month Time.now.local.day mp["hh"] mp["mi"] mp["ss"]
-    cval.clear // prevent a second call of this routine by clearing the global variable
+  mp := {:} // Time map.
 
+  val.do: | item |
+    thing = item.split "="
+    mp[thing[0]] = int.parse thing[1]
+
+  // The click only shows 12 hours. We can decide whether it's currently AM or PM.
+  now := Time.now.local
+  am := Time.local now.year now.month now.day mp["hh"] mp["mi"] mp["ss"]
+  pm := Time.local now.year now.month now.day (mp["hh"] + 12) mp["mi"] mp["ss"]
+
+  // Note that we don't take daylight savings into account when trying to find the best
+  // time.
+
+  // We are willing to let the clock stand still for up to $MAX_STAND_STILL_DURATION seconds.
+  // For that the two possible times must be in the future.
+  if am < now.time: am += Duration --h=24
+  if pm < now.time: pm += Duration --h=24
+  if (now.time.to am) < MAX_STAND_STILL_DURATION:
+    ctime = am
+    return
+  if (now.time.to pm) < MAX_STAND_STILL_DURATION:
+    ctime = pm
+    return
+
+  // We now know that we need to catch up. Make sure both possible times are indeed in the past.
+  am -= Duration --h=24
+  pm -= Duration --h=24
+
+  if (am.to now.time) < (pm.to now.time):
+    ctime = am
+  else:
+    ctime = pm
 
 
 
 /////////////////////// main ///////////////////////////////////////////////////
 
 main :
+  print "WallClock starting..."
 
-    print "WallClock starting..."
+  // Set up MQTT client for use in pub and sub.
+  socket := net.open.tcp_connect HOST PORT
+  client := mqtt.Client
+      CLIENT_ID
+      mqtt.TcpTransport socket
 
-    // set up MQTT client for use in pub and sub
-    socket := net.open.tcp_connect HOST PORT
-    client := mqtt.Client
-        CLIENT_ID
-        mqtt.TcpTransport socket
+  // Set up sub to get last cft.
+  client.subscribe TOPIC --qos=1
 
-    // set up sub to get last cft
-    client.subscribe TOPIC --qos=1
+  start_ctime/Time := Time.from_string "2000-01-01T12:00:00Z"
 
-    task::
-        client.handle: | topic/string payload/ByteArray |
-            if just_started: //only do this once at startup - may remove this flag once unsub is working
-                just_started = false
-                storedcft := payload.to_string
-                print "Sub recvd: Stored cft was $storedcft"
-                start_ctime = Time.from_string storedcft
-                client.unsubscribe TOPIC
-            else:
-                print "discarding at $Time.now" //should never see this if unsubscribe works correctly
-            
-            print "end of client.handle task"
+  task::
+    just_started/bool := true
+    client.handle: | topic/string payload/ByteArray |
+      if just_started: // Only do this once at startup - may remove this flag once unsub is working.
+        just_started = false
+        stored_cft := payload.to_string
+        print "Sub recvd: Stored cft was $stored_cft"
+        start_ctime = Time.from_string stored_cft
+        client.unsubscribe TOPIC
+      else:
+        print "discarding at $Time.now" // Should never see this if unsubscribe works correctly.
 
-
-/////////// set up responses from restserver
-    // Whatever this lambda returns is added to the body json of the 500 reply on exception
-    rest := RestServer (ss) 
-        //log_system.get_recent_logs 25 // For example return the last 25 logs generated prior to the exception
+      print "end of client.handle task"
 
 
-    rest.get "/cft" :: | req/RestRequest resp/RestResponse |
-        resp.http_res.write htmlcft
+  /////////// Set up responses from restserver.
+  ss /ServerSocket := net.open.tcp_listen 80
 
-    rest.post "/thy" :: | reqt/RestRequest respt/RestResponse |
-        t := Time.now
-        page := htmlthy + "$(%02d t.local.h):$(%02d t.local.m):$(%02d t.local.s) " + xx 
-        respt.http_res.write page  
-
-        cval = reqt.http_req.body.read.to_string.split "&"
+  rest := RestServer (ss)
+  //log_system.get_recent_logs 25 // For example return the last 25 logs generated prior to the exception
 
 
-////// initialise coil driver to off
-    coil.set 0
-    sleep --ms=2000 //wait so do not get double pulse if restart is very fast and time to receive subscription
+  rest.get "/cft" :: | req/RestRequest resp/RestResponse |
+    resp.http_res.write HTML_CFT
 
-/////// wait for right time for first click
-    while Time.now.local.s !=0 and Time.now.local.s !=30: //wait for optimum time to start
-        //print Time.now.local.s
-        sleep --ms=500
+  rest.post "/thy" :: | reqt/RestRequest respt/RestResponse |
+    page := html_thy Time.now
+    respt.http_res.write page
 
-    print "********* Starting @ $Time.now.local because secs = $Time.now.local.s"
-    print "start_ctime is $start_ctime.to_byte_array"
-    if start_ctime.to_byte_array[0] == 2000: //there was no stored time to pick up via MQTT
-        pulse client
-        ctime = Time.now //kickoff without getting right time
-    else:
-        ctime = start_ctime //kickoff with stored cft from MQTT
+    set_ctime (reqt.http_req.body.read.to_string.split "&")
 
-///////// now pulse if/when required, terminate every day at noon for a clean slate
-    while not (Time.now.local.h == 12 and Time.now.local.m == 00 and Time.now.local.s == 5 and restart): // 5secs after last pulse
-        dur = Duration.since ctime
-        //check to prevent restart if time is being adjusted, ie dur is > 60secs or less than 0
-        if dur > SEC60 or dur < SEC0:
-            restart = false
-        else:
-            restart = true
 
-        if dur >= SEC30:
-            pulse client
-        sleep --ms=480 //was checkWait
+  ////// Initialise coil driver to off.
+  coil.set 0
+  sleep --ms=2_000 // Wait so do not get double pulse if restart is very fast and time to receive subscription.
 
-        //check for clock setting
-        if cval.is_empty == false: //values have been set so use them
-            setctime cval
-    //exiting for restart        
-    //probably not required, testing... pulse client// will miss this one while exiting so explicitly do it here
-    print "Stopping for clean slate restart"
-    
-    exit 0   //hard exit to kill restserver as well as this program
-        
+  /////// Wait for right time for first click.
+  while Time.now.local.s !=0 and Time.now.local.s !=30:
+    //print Time.now.local.s
+    sleep --ms=500
+
+  print "********* Starting @ $Time.now.local because secs = $Time.now.local.s"
+  print "start_ctime is $start_ctime"
+  if start_ctime.utc.year == 2000: // There was no stored time to pick up via MQTT.
+    pulse client
+    ctime = Time.now // Kickoff without getting right time.
+  else:
+    ctime = start_ctime //kickoff with stored cft from MQTT
+
+  ///////// Now pulse if/when required.
+
+  // Whether the wall clock is in a good regime and just ticking along.
+  on_time := true
+  while true:
+    now := Time.now.local
+    // Terminate every day at noon for a clean slate.
+    if on_time and (now.h == 12 and now.m == 0 and now.s == 5):
+      break
+
+    dur := Duration.since ctime
+    // Check to prevent restart if time is being adjusted, ie dur is > 60secs or less than 0.
+    on_time = SEC0 <= dur <= SEC60
+
+    if dur >= SEC30:
+      pulse client
+
+    sleep --ms=480 //was checkWait
+
+  // Exiting for restart.
+  // Probably not required, testing... pulse client// will miss this one while exiting so explicitly do it here.
+  print "Stopping for clean slate restart"
+
+  exit 0   // Hard exit to kill restserver as well as this program.
