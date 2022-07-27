@@ -16,6 +16,7 @@ import rest_server show RestServer RestRequest RestResponse
 coil/gpio.Pin ::= gpio.Pin 12 --output // Pin to drive solenoid MOSFET.
 
 ctime/Time := Time.now // Clock face time.
+it_ran/bool := false //true if program ran
 PULSETIME_MS ::= 10 // Time for pulse to be on in ms.
 // The maximum time we are willing to wait to get to an accurate time.
 // If the clock is only slightly ahead we are going to stand still until the
@@ -111,14 +112,15 @@ html_thy t/Time -> string:
 
 //////////////////////////////
 pulse pclient/mqtt.Client:
+  // Publish the latest clock face time to be retained in case of power outage.
+  // do this BEFORE pulsing so that failure prevents an unrecorded pulse
+  ctime = ctime + SEC30
+  pclient.publish TOPIC ctime.local.stringify.to_byte_array --qos=1 --retain=true
+  //print "published $ctime.local"
   coil.set 1
   sleep --ms=PULSETIME_MS
   coil.set 0
-  ctime = ctime + SEC30
-  // Publish the latest clock face time to be retained in case of power outage.
-  pclient.publish TOPIC ctime.local.stringify.to_byte_array --qos=1 --retain=true
-  //print "published $ctime.local"
-  //wdt.feed() //feed watchdog timer if required
+   //wdt.feed() //feed watchdog timer if required
 
 
 ////////////////////////////////////////
@@ -167,88 +169,94 @@ set_ctime val:
 
 main :
   print "WallClock starting..."
+  try: //give up if fails anything, most likely will be network not up
+    // Set up MQTT client for use in pub and sub.
+    socket := net.open.tcp_connect HOST PORT
+    client := mqtt.Client
+        CLIENT_ID
+        mqtt.TcpTransport socket
 
-  // Set up MQTT client for use in pub and sub.
-  socket := net.open.tcp_connect HOST PORT
-  client := mqtt.Client
-      CLIENT_ID
-      mqtt.TcpTransport socket
+    // Set up sub to get last cft.
+    client.subscribe TOPIC --qos=1
 
-  // Set up sub to get last cft.
-  client.subscribe TOPIC --qos=1
+    start_ctime/Time := Time.from_string "2000-01-01T12:00:00Z"
 
-  start_ctime/Time := Time.from_string "2000-01-01T12:00:00Z"
+    task::
+      just_started/bool := true
+      client.handle: | topic/string payload/ByteArray |
+        if just_started: // Only do this once at startup - may remove this flag once unsub is working.
+          just_started = false
+          stored_cft := payload.to_string
+          print "Sub recvd: Stored cft was $stored_cft"
+          start_ctime = Time.from_string stored_cft
+          client.unsubscribe TOPIC
+        else:
+          print "discarding at $Time.now" // Should never see this if unsubscribe works correctly.
 
-  task::
-    just_started/bool := true
-    client.handle: | topic/string payload/ByteArray |
-      if just_started: // Only do this once at startup - may remove this flag once unsub is working.
-        just_started = false
-        stored_cft := payload.to_string
-        print "Sub recvd: Stored cft was $stored_cft"
-        start_ctime = Time.from_string stored_cft
-        client.unsubscribe TOPIC
-      else:
-        print "discarding at $Time.now" // Should never see this if unsubscribe works correctly.
-
-      print "end of client.handle task"
-
-
-  /////////// Set up responses from restserver.
-  ss /ServerSocket := net.open.tcp_listen 80
-
-  rest := RestServer (ss)
-  //log_system.get_recent_logs 25 // For example return the last 25 logs generated prior to the exception
+        print "end of client.handle task"
 
 
-  rest.get "/cft" :: | req/RestRequest resp/RestResponse |
-    resp.http_res.write HTML_CFT
+    /////////// Set up responses from restserver.
+    ss /ServerSocket := net.open.tcp_listen 80
 
-  rest.post "/thy" :: | reqt/RestRequest respt/RestResponse |
-    page := html_thy Time.now
-    respt.http_res.write page
-
-    set_ctime (reqt.http_req.body.read.to_string.split "&")
+    rest := RestServer (ss)
+    //log_system.get_recent_logs 25 // For example return the last 25 logs generated prior to the exception
 
 
-  ////// Initialise coil driver to off.
-  coil.set 0
-  sleep --ms=2_000 // Wait so do not get double pulse if restart is very fast and time to receive subscription.
+    rest.get "/cft" :: | req/RestRequest resp/RestResponse |
+      resp.http_res.write HTML_CFT
 
-  /////// Wait for right time for first click.
-  while Time.now.local.s !=0 and Time.now.local.s !=30:
-    //print Time.now.local.s
-    sleep --ms=500
+    rest.post "/thy" :: | reqt/RestRequest respt/RestResponse |
+      page := html_thy Time.now
+      respt.http_res.write page
 
-  print "********* Starting @ $Time.now.local because secs = $Time.now.local.s"
-  print "start_ctime is $start_ctime"
-  if start_ctime.utc.year == 2000: // There was no stored time to pick up via MQTT.
-    pulse client
-    ctime = Time.now // Kickoff without getting right time.
-  else:
-    ctime = start_ctime //kickoff with stored cft from MQTT
+      set_ctime (reqt.http_req.body.read.to_string.split "&")
 
-  ///////// Now pulse if/when required.
 
-  // Whether the wall clock is in a good regime and just ticking along.
-  on_time := true
-  while true:
-    now := Time.now.local
-    // Terminate every day at noon for a clean slate.
-    if on_time and (now.h == 12 and now.m == 0 and now.s == 5):
-      break
+    ////// Initialise coil driver to off.
+    coil.set 0
+    sleep --ms=2_000 // Wait so do not get double pulse if restart is very fast and time to receive subscription.
+    it_ran = true
 
-    dur := Duration.since ctime
-    // Check to prevent restart if time is being adjusted, ie dur is > 60secs or less than 0.
-    on_time = SEC0 <= dur <= SEC60
+    /////// Wait for right time for first click.
+    while Time.now.local.s !=0 and Time.now.local.s !=30:
+      //print Time.now.local.s
+      sleep --ms=500
 
-    if dur >= SEC30:
-      pulse client
+    print "********* Starting @ $Time.now.local because secs = $Time.now.local.s"
+    print "start_ctime is $start_ctime"
+    if start_ctime.utc.year == 2000: // There was no stored time to pick up via MQTT.
+      // do we need this? pulse client
+      ctime = Time.now // Kickoff without getting right time.
+    else:
+      ctime = start_ctime //kickoff with stored cft from MQTT
 
-    sleep --ms=480 //was checkWait
+    ///////// Now pulse if/when required.
 
-  // Exiting for restart.
-  // Probably not required, testing... pulse client// will miss this one while exiting so explicitly do it here.
-  print "Stopping for clean slate restart"
+    // Whether the wall clock is in a good regime and just ticking along.
+    on_time := true
+    while true:
+      now := Time.now.local
+      // Terminate every day at noon for a clean slate.
+      if on_time and (now.h == 12 and now.m == 0 and now.s == 5):
+        break
 
+      dur := Duration.since ctime
+      // Check to prevent restart if time is being adjusted, ie dur is > 60secs or less than 0.
+      on_time = SEC0 <= dur <= SEC60
+
+      if dur >= SEC30:
+        pulse client
+
+      sleep --ms=480 //was checkWait
+
+    // Exiting for restart.
+    // Probably not required, testing... pulse client// will miss this one while exiting so explicitly do it here.
+    print "Stopping for clean slate restart"
+    print "start_ctime is $start_ctime"
+    print "ctime is $ctime"
+  finally:
+    if not it_ran:
+      print "Restarting because of error"
+      
   exit 0   // Hard exit to kill restserver as well as this program.
